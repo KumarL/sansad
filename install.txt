@@ -1,1 +1,15 @@
-1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor
+Installation:
+1. Bundler -- sudo gem install bundler
+2. Homebrew -- ruby -e "$(curl -fsSL https://raw.github.com/Homebrew/homebrew/go/install)"
+3. graphicsmagick -- brew install graphicsmagick
+4. Gemfile -- bundle install --local --path vendor
+  4.1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor
+5. Rack -- sudo gem install rack
+6. Mongodb -- brew update; brew install mongodb
+
+Running:
+1. mongod --httpinterface --dbpath ~/data/db/
+2. rackup
+
+Tasks:
+1. bundle exec rake task:legislators
