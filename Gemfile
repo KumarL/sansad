@@ -39,3 +39,5 @@ gem 'curb', '~> 0.8'
 gem 'nokogiri', '~> 1.5'
 gem 'docsplit', '~> 0.6'
 gem 'us-documents' # for bill/FR html processing
+gem 'spreadsheet'
+gem 'digest'

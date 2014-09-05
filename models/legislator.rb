@@ -2,50 +2,35 @@ class Legislator
   include Api::Model
   publicly :queryable
 
-  basic_fields  :bioguide_id, :thomas_id, :lis_id, :fec_ids,
-      :votesmart_id, :crp_id, :govtrack_id, :icpsr_id, :ocd_id,
-      :title, :first_name, :nickname, :middle_name, :last_name, :name_suffix,
-      :other_names, :gender, :in_office, :senate_class, :birthday,
-      :state, :state_name, :party, :chamber, :leadership_role, :district, :state_rank,
-      :phone, :fax, :office, :website, :contact_form,
-      :twitter_id, :facebook_id, :youtube_id, :oc_email,
-      :term_start, :term_end
+  basic_fields  :bioguide_id, :first_name, :last_name, :gender,
+      :age, :elected, :education_qualification, :education_details,
+      :debates, :private_bills, :questions, :attendance, :notes,
+      :state, :party, :chamber, :constituency, :phone, :fax,
+      :office, :website, :twitter_id, :facebook_id, :in_office,
+      :youtube_id, :term_start, :term_end, :title
 
-  search_fields :first_name, :last_name, :middle_name, :nickname, "other_names.last"
-
+  search_fields :first_name, :last_name, :constituency, :state
 
   include Mongoid::Document
   include Mongoid::Timestamps
 
-  index in_office: 1
-
+  #In the absence of any suitable id, we'd just use the concatenation
+  #of the first_name, last_name, and the state as the id. Likely, we
+  #won't hit more than one such legislator?
   index bioguide_id: 1
-  index govtrack_id: 1
-  index thomas_id: 1
-  index votesmart_id: 1
-  index crp_id: 1
-  index ocd_id: 1
-  index lis_id: 1
-  index icpsr_id: 1
-  index fec_ids: 1
 
   index chamber: 1
-  index title: 1
   index state: 1
-  index state_name: 1
-  index district: 1
+  index constituency: 1
   index party: 1
   index gender: 1
-  index senate_class: 1
-  index birthday: 1
+  index education_qualification: 1
 
   index first_name: 1
   index last_name: 1
-  index nickname: 1
-  index middle_name: 1
-  index name_suffix: 1
 
   index term_start: 1
   index term_end: 1
   index terms_count: 1 # undocumented for now
+  index in_office: 1 # Not used right now
 end

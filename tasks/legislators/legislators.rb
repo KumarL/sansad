@@ -1,6 +1,8 @@
-require 'csv'
+require 'spreadsheet'
+require 'digest'
 
 class Legislators
+
   # options:
   #   cache: don't re-download unitedstates data
   #   current: limit to current legislators only
@@ -10,235 +12,144 @@ class Legislators
 
   def self.run(options = {})
 
-    # wipe and re-clone the unitedstates legislators repo
-    unless options[:cache]
-      FileUtils.mkdir_p "data/unitedstates"
-      FileUtils.rm_rf "data/unitedstates/congress-legislators"
-      unless system "git clone git://github.com/unitedstates/congress-legislators.git data/unitedstates/congress-legislators"
-        Report.failure self, "Couldn't clone legislator data from unitedstates."
-        return false
-      end
-    end
+    # 1. Download the excel file
+    # 2. Compute checksum and exit if it's same as the last download
+    # 3. If not, update the db
+    lsbook_url = "http://www.prsindia.org/MPTrack-16.xls"
+    rsbook_url = "http://www.prsindia.org/Rajya.xls"
 
-    #politwoops download
-    twoops_dict = {}
-    begin
-      puts "downloading twoops"
-      twoops = Utils.download "http://politwoops.sunlightfoundation.com/users.csv"
-      CSV.parse(twoops) do |line|
-        if line[13] != nil and line[13] != ''
-          if twoops_dict.has_key? line[13] and (line[5] == "campaign")
-            twoops_dict[line[13]].push line[0]
-          elsif line[5] == "campaign"
-            twoops_dict[line[13]]= [line[0]]
-          end
-        end
-      end
-    rescue
-      Report.warning self, "Politwoops info did not download"
-    end
-
-    puts "Loading in YAML files..." if options[:debug]
-    current_legislators = YAML.load open("data/unitedstates/congress-legislators/legislators-current.yaml")
-
-    social_media = YAML.load open("data/unitedstates/congress-legislators/legislators-social-media.yaml")
-    social_media_cache = {}
-    social_media.each {|details| social_media_cache[details['id']['bioguide']] = details}
+    legislator_urls = {"Lok Sabha" => lsbook_url, "Rajya Sabha" => rsbook_url}
 
     bad_legislators = []
     count = 0
 
-    us_legislators = current_legislators.map {|l| [l, true]}
-    unless options[:current]
-      historical_legislators = YAML.load open("data/unitedstates/congress-legislators/legislators-historical.yaml")
-      us_legislators += historical_legislators.map {|l| [l, false]}
-    end
+    legislator_urls.keys.each do |chamber|
+      mpbook_path = "download/#{chamber.gsub(/\s+/, "")}New.xlx"
+      File.delete mpbook_path if File.exists? mpbook_path
 
-    # wipe db if requested
-    Legislator.delete_all if options[:clear]
+      book_url = legislator_urls[chamber]
 
-    # limit if requested
-    us_legislators = us_legislators.to_a
-    us_legislators = us_legislators.first(options[:limit].to_i) if options[:limit]
-
-    if options[:bioguide_id].present?
-      us_legislators = us_legislators.select {|l, current| l['id']['bioguide'] == options[:bioguide_id]}
-    end
-
-    us_legislators.each do |us_legislator, current|
-      bioguide_id = us_legislator['id']['bioguide']
-      puts "[#{bioguide_id}] Processing #{current ? "active" : "inactive"} legislator from unitedstates..." if options[:debug]
-
-      legislator = Legislator.find_or_initialize_by bioguide_id: bioguide_id
-      legislator.attributes = attributes_from_united_states us_legislator, current, twoops_dict
-
-      # append social media if present
-      if social_media_cache[bioguide_id]
-        legislator.attributes = social_media_from social_media_cache[bioguide_id]
+      result = Utils.curl book_url, mpbook_path
+      if result.nil? or '200 OK' != result.status
+        puts "Couldn't download the MP file. The url #{book_url} returned with status #{result.status}" 
+        next
       end
 
-      # calculate OCD IDs on demand from other attributes
-      legislator['ocd_id'] = ocd_id_for legislator
+      # Check if the newly downloaded file is same as the last download
+      mpbook_old_path = "download/#{chamber.gsub(/\s+/, "")}.xlx"
+      if (File.exists? mpbook_old_path)
+	      old_file = File.new mpbook_old_path
+	      new_file = File.new mpbook_path
 
-      if legislator.save
-        count += 1
-      else
-        bad_legislators << {attributes: legislator.attributes, errors: legislator.errors.full_messages}
+	      old_chksum = Digest::SHA2.file(old_file).hexdigest
+	      new_chksum = Digest::SHA2.file(new_file).hexdigest
+
+	      if (old_chksum == new_chksum) # If the downloaded file is bit indentical to last download
+	        File.delete mpbook_path
+	        next
+	      end
+      end
+
+	    # If you are here, that means we want to work with the newly downloaded file
+      # First step - Rename it to the new with the "old" file, overriding if needed
+	    File.rename(mpbook_path,mpbook_old_path)
+      book = Spreadsheet.open mpbook_old_path
+      sheet1 = book.worksheet 0 # Access the first worksheet
+      is_first = true
+      sheet1.each do |row|
+
+        if (is_first)
+          is_first = false
+          next # Ignore the header row
+        end
+
+        attributes_new = attributes_from_prs row, chamber
+        legislator = Legislator.find_or_initialize_by bioguide_id: attributes_new[:bioguide_id]
+        legislator.attributes = attributes_new
+
+        if legislator.save
+          count += 1
+        else
+          bad_legislators << {attributes: legislator.attributes, errors: legislator.errors.full_messages}
+        end
       end
     end
 
+#    We will revisit this code later. We're fine for now.
+
+#    lsmembers_url = 'http://164.100.47.132/LssNew/Members/Alphabaticallist.aspx'
+#    doc = Utils.html_for lsmembers_url
+#    puts 'Failed to parse HTML document of LokSabha page'; return if doc.nil?
+#
+#    rows = doc.css 'table#ctl00_ContPlaceHolderMain_Alphabaticallist1_dg1 > tr'
+#    rows.each do |row|
+#      tds = row.css 'td.griditem'
+#      next unless 4 == tds.count
+#      bio_link = URI.join lsmembers_url, (tds[0].css 'a').first()['href']
+#      bio_link = URI::join lsmembers_url, bio_link #Ensures that relative links are absolute links
+#      mp_id = bio_link[(bio_link.rindex('=')+1)..-1]
+#
+#      bio_doc = Utils.html_for bio_link
+#      titledName = (bio_doc.css 'table#ctl00_ContPlaceHolderMain_Bioprofile1_Datagrid1 td.gridheader1').text
+#      last_name, first_name = titledName.split ','
+#      title, first_name = first_name.split ' '
+#      first_name = (first_name.split ' ')[1..-1].join ' ' if first_name.start_with? '('
+#
+#    end
+#
     if bad_legislators.any?
-      Report.warning self, "Failed to save #{bad_legislators.size} united_states legislators.", bad_legislators: bad_legislators
+      Report.warning self, "Failed to save #{bad_legislators.size} PRS LS legislators.", bad_legislators: bad_legislators
     end
 
-    Report.success self, "Processed #{count} legislators from unitedstates"
+    Report.success self, "Processed #{count} legislators from PRS"
   end
 
-  def self.ocd_id_for(legislator)
-    prefix = "ocd-division/country:us"
-    state = legislator['state'].downcase
-    district = legislator['district']
+  def self.attributes_from_prs(row, house)
+    name_index = 0
+    elected_index = 1
+    term_start_index = 2
+    term_end_index = 3
+    state_name_index = 4
+    constituency_index = 5
+    party_index = 6
+    gender_index = 7
+    education_qualification_index = 8
+    education_details_index = 9
+    age_index = 10
+    debates_index = 11
+    private_bills_index = 12
+    questions_index = 13
+    attendance_index = 14
+    notes_index = 15
 
-    # senators
-    if legislator.chamber == "senate"
-      "#{prefix}/state:#{state}"
-
-    elsif legislator.chamber == "house"
-      # dc delegate
-      if state == "dc"
-        "#{prefix}/district:dc"
-
-      # other non-state territories
-      elsif %w{as gu mp pr vi}.include?(state)
-        "#{prefix}/territory:#{state}"
-
-      # at-large normal reps
-      elsif district == 0
-        "#{prefix}/state:#{state}"
-
-      # remaining normal reps
-      elsif district > 0
-        "#{prefix}/state:#{state}/cd:#{district}"
-      end
-    end
-
-  end
-
-  def self.attributes_from_united_states(us_legislator, current, twoops_dict)
-    # don't pick from calculated terms, used for reference only
-    last_term = us_legislator['terms'].last
-
-    # massage terms array a bit, remove some top-level fields
-    terms = terms_for us_legislator
-
-    full_names = []
-    first_name = us_legislator['name']['first']
-    last_name = us_legislator['name']['last']
-    nickname = us_legislator['name']['nickname']
-    middle_name = us_legislator['name']['middle']
-    suffix = us_legislator['name']['suffix']
-    if first_name != nil
-      full_names.push "#{first_name} #{last_name}"
-      if middle_name != nil
-        full_names.push "#{first_name} #{middle_name} #{last_name}"
-      end
-      if suffix != nil
-        full_names.push "#{first_name} #{last_name} #{suffix}"
-      end
-    end
-    if nickname != nil
-      full_names.push "#{nickname} #{last_name}"
-    end
-
+    first_name, last_name = Utils.split_fullname row[name_index]
+    elected = row[elected_index].downcase.eql? 'Elected'.downcase
+    in_office = true # We're only querying the current session of the parliament
 
     attributes = {
-      in_office: current,
-
-      thomas_id: us_legislator['id']['thomas'].to_s,
-      govtrack_id: us_legislator['id']['govtrack'].to_s,
-      crp_id: us_legislator['id']['opensecrets'].to_s,
-      fec_ids: us_legislator['id']['fec'],
-
-      full_names: full_names,
-      first_name: us_legislator['name']['first'],
-      nickname: us_legislator['name']['nickname'],
-      last_name: us_legislator['name']['last'],
-      middle_name: us_legislator['name']['middle'],
-      name_suffix: us_legislator['name']['suffix'],
-      gender: us_legislator['bio'] ? us_legislator['bio']['gender'] : nil,
-      birthday: us_legislator['bio'] ? us_legislator['bio']['birthday'] : nil,
-      leadership_role: nil,
-
-      term_start: last_term['start'],
-      term_end: last_term['end'],
-      state: last_term['state'],
-      state_name: state_map[last_term['state']],
-      party: party_for(last_term['party']),
-
-      # take advantage of title rewriting on calculated terms
-      title: terms.last['title'],
-
-      chamber: {
-        'rep' => 'house',
-        'sen' => 'senate',
-        'del' => 'house',
-        'com' => 'house'
-      }[last_term['type']],
-
-      phone: last_term['phone'],
-      fax: last_term['fax'],
-      website: last_term['url'],
-      office: last_term['office'],
-      contact_form: last_term['contact_form'],
-
-      terms: terms,
-      terms_count: terms.size
+      bioguide_id: row[name_index] + '_' + row[state_name_index],
+      first_name: first_name.to_s,
+      last_name: last_name.to_s,
+      gender: row[gender_index],
+      age: row[age_index].to_i.to_s,
+      state: row[state_name_index],
+      constituency: row[constituency_index].to_s,
+      party: row[party_index],
+      elected: elected,
+      in_office: in_office,
+      education_qualification: row[education_qualification_index],
+      education_details: row[education_details_index],
+      debates: row[debates_index],
+      private_bills: row[private_bills_index],
+      questions: row[questions_index],
+      attendance: (row[attendance_index] * 100).to_i.to_s,
+      notes: row[notes_index],
+      chamber: house,
+      term_start: row[term_start_index].to_s,
+      term_end: row[term_end_index].to_s
     }
 
-    if us_legislator['leadership_roles']
-      role = us_legislator['leadership_roles'].last
-      unless role.has_key?("end")
-        attributes[:leadership_role] = role['title']
-      end
-    end
-
-    if us_legislator['other_names']
-      attributes[:other_names] = us_legislator['other_names']
-    end
-
-    if us_legislator['id']['votesmart'].present?
-      attributes[:votesmart_id] = us_legislator['id']['votesmart']
-    end
-
-    if us_legislator['id']['icpsr'].present?
-      attributes[:icpsr_id] = us_legislator['id']['icpsr']
-    end
-
-    if attributes[:chamber] == "senate"
-      attributes[:senate_class] = last_term['class']
-      attributes[:lis_id] = us_legislator['id']['lis'].to_s
-      attributes[:state_rank] = last_term['state_rank']
-      attributes[:district] = nil
-    elsif attributes[:chamber] == "house"
-      attributes[:district] = last_term['district']
-    end
-
-    if current == true
-      # create open congress email address
-      attributes[:oc_email] = create_oc_email(last_term['url'], attributes[:chamber])
-      # create 
-      if twoops_dict.has_key? us_legislator['id']['bioguide']
-        campaign_twitter = []
-        twoops_dict[us_legislator['id']['bioguide']].each do |handle|
-          campaign_twitter.push handle
-        end
-        attributes[:campaign_twitter] = campaign_twitter 
-      end 
-    else
-      attributes[:oc_email] = nil
-    end
-
-    attributes
+    attributes # return attributes
   end
 
   def self.party_for(us_party)
@@ -286,77 +197,5 @@ class Legislators
 
       term
     end
-  end
-
-  def self.state_map
-    @state_map ||= {
-      "MP" => "Northern Mariana Islands",
-      "DC" => "District of Columbia",
-      "AS" => "American Samoa",
-      "PR" => "Puerto Rico",
-      "GU" => "Guam",
-      "VI" => "US Virgin Islands",
-      "AL" => "Alabama",
-      "AK" => "Alaska",
-      "AZ" => "Arizona",
-      "AR" => "Arkansas",
-      "CA" => "California",
-      "CO" => "Colorado",
-      "CT" => "Connecticut",
-      "DE" => "Delaware",
-      "FL" => "Florida",
-      "GA" => "Georgia",
-      "HI" => "Hawaii",
-      "ID" => "Idaho",
-      "IL" => "Illinois",
-      "IN" => "Indiana",
-      "IA" => "Iowa",
-      "KS" => "Kansas",
-      "KY" => "Kentucky",
-      "LA" => "Louisiana",
-      "ME" => "Maine",
-      "MD" => "Maryland",
-      "MA" => "Massachusetts",
-      "MI" => "Michigan",
-      "MN" => "Minnesota",
-      "MS" => "Mississippi",
-      "MO" => "Missouri",
-      "MT" => "Montana",
-      "NE" => "Nebraska",
-      "NV" => "Nevada",
-      "NH" => "New Hampshire",
-      "NJ" => "New Jersey",
-      "NM" => "New Mexico",
-      "NY" => "New York",
-      "NC" => "North Carolina",
-      "ND" => "North Dakota",
-      "OH" => "Ohio",
-      "OK" => "Oklahoma",
-      "OR" => "Oregon",
-      "PA" => "Pennsylvania",
-      "RI" => "Rhode Island",
-      "SC" => "South Carolina",
-      "SD" => "South Dakota",
-      "TN" => "Tennessee",
-      "TX" => "Texas",
-      "UT" => "Utah",
-      "VT" => "Vermont",
-      "VA" => "Virginia",
-      "WA" => "Washington",
-      "WV" => "West Virginia",
-      "WI" => "Wisconsin",
-      "WY" => "Wyoming"
-    }
-  end
-  def self.create_oc_email website, chamber
-    return nil if website == nil
-    pattern = /^(?:www[.])?([-a-z0-9]+)[.](house|senate)[.]gov$/i
-    url = URI.parse(website)
-    return nil if url.host.nil?
-    match = pattern.match(url.host.downcase)
-    return nil if match.nil?
-    nameish, chamber = match.captures
-    prefix = (chamber.downcase == 'senate') ? 'Sen' : 'Rep'
-    return "#{prefix.capitalize}.#{nameish.capitalize}@opencongress.org"   
   end
 end

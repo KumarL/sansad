@@ -620,5 +620,30 @@ module Utils
 
     system command
   end
+  # splits full name into first and the last name and returns
+  # them as first and second elements of array
+  def self.split_fullname(fullname)
+    first_name = last_name = nil
+    unless fullname.nil? || 0 == fullname.length
+      lastname_index = fullname.rindex(' ')
+      if (lastname_index.nil?)
+        last_name = fullname
+      else
+        first_name = fullname[0, lastname_index]
+        last_name = fullname[lastname_index +1, fullname.length - 1]
+      end
+    end
+    [first_name, last_name] # return separated names as memeber of array
+  end
+
+  def self.parse_date(date_str)
+    begin
+      d = Date.parse date_str.to_s unless date_str.to_s.start_with? 'Within'
+      return d
+    rescue ArgumentError
+      nil
+    end
+  end
+
 
 end
