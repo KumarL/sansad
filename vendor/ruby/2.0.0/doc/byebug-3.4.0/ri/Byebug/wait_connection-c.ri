@@ -1,0 +1,2 @@
+U:RDoc::Attr[iI"wait_connection:ETI"Byebug::wait_connection;FI"RW;T:publico:RDoc::Markup::Document:@parts[o:RDoc::Markup::Paragraph;	[I"6If in remote mode, wait for the remote connection;T:
+@fileI"lib/byebug/remote.rb;T:0@omit_headings_from_table_of_contents_below0T@I"Byebug;FcRDoc::NormalModule0

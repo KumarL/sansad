@@ -1,0 +1,1 @@
+1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor

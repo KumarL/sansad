@@ -1,0 +1,2 @@
+U:RDoc::Attr[iI"actual_port:ETI"Byebug::actual_port;FI"RW;T:publico:RDoc::Markup::Document:@parts[o:RDoc::Markup::Paragraph;	[I"2The actual port that the server is started at;T:
+@fileI"lib/byebug/remote.rb;T:0@omit_headings_from_table_of_contents_below0T@I"Byebug;FcRDoc::NormalModule0
