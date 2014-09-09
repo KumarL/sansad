@@ -1,3 +1,7 @@
+require 'docsplit'
+require 'uri'
+#require 'pry-remote'
+
 class Bills
 
   # options:
@@ -6,387 +10,227 @@ class Bills
   #   limit: A limit on the number of processed bills. Useful for development.
 
   def self.run(options = {})
-    congress = options[:congress] ? options[:congress].to_i : Utils.current_congress
-
     count = 0
-    missing_legislators = []
-    missing_committees = []
     bad_bills = []
+    @billtrack_url = 'http://www.prsindia.org/billtrack'
 
-    # we track when new summaries are added, for analytical interest
-    new_summaries = []
-
-    unless File.exists?("data/unitedstates/congress/#{congress}/bills")
-      Report.failure self, "Data not available on disk for the requested Congress."
+    html_doc = Utils.html_for @billtrack_url
+    
+    if (html_doc.nil?)
+      Report.failure self, "Nokogiri failed to parse the HTML content of the bill track web page"
       return
     end
 
-    legislators = {}
-    committee_cache = {}
+    rows_selector = 'div.content > form > div > table > tr[onclick]'
+    rows = html_doc.css rows_selector
 
-    if options[:bill_id]
-      bill_ids = [options[:bill_id]]
-    else
-      paths = Dir.glob("data/unitedstates/congress/#{congress}/bills/*/*")
-      bill_ids = paths.map {|path| "#{File.basename path}-#{congress}"}
-      if options[:limit]
-        bill_ids = bill_ids.first options[:limit].to_i
-      end
+    if (0 == rows.count)
+      Report.failure self, "Failed to find any rows in the table of the bills. Returning."
+      return
     end
 
-
-    bill_ids.each do |bill_id|
-      bill = Bill.find_or_initialize_by bill_id: bill_id
-      type, number, congress, chamber = Utils.bill_fields_from bill_id
-
-      path = "data/unitedstates/congress/#{congress}/bills/#{type}/#{type}#{number}/data.json"
-      doc = Oj.load open(path)
-
-
-      introduced_on = doc['introduced_at'] # must get done before summary check
-
-      if doc['sponsor']
-        sponsor = sponsor_for doc['sponsor'], legislators
-        missing_legislators << [bill_id, doc['sponsor']] if sponsor.nil?
-      else
-        sponsor = nil # occurs at least in hjres45-111, debt ceiling bill
-      end
-
-      cosponsors, withdrawn, missing = cosponsors_for doc['cosponsors'], legislators
-      missing_legislators += missing.map {|m| [bill_id, m]} if missing.any?
-
-      actions = actions_for doc['actions'], committee_cache
-
-      summary = summary_for doc['summary']
-      summary_short = short_summary_for summary
-      summary_date = summary_date_for doc['summary']
-
-      # if a summary is here, and it wasn't before, record this
-      if bill['summary'].blank? and summary.present?
-        new_summaries << {bill_id: bill_id, introduced_on: introduced_on, new_record: bill.new_record?}
-      end
-
-      committees, missing = committees_for doc['committees'], committee_cache
-      missing_committees += missing.map {|m| [bill_id, m]} if missing.any?
-
-      # todo: when amendments are supported,
-      # pass on a full related_bills field with the original fields.
-      related_bill_ids = doc['related_bills'].map {|details| details['bill_id']}.compact
-
-      votes = votes_for actions
-
-      # in rare cases, there are no actions. in those cases:
-      #   * make last_action null
-      #   * set last_action_at to introduced_on, so there's always something to sort on
-      last_action = actions.any? ? actions.last : nil
-      last_action_at = actions.any? ? actions.last['acted_at'] : introduced_on
-
-      bill.attributes = {
-        bill_type: type,
-        number: number,
-        congress: congress,
-        chamber: {'h' => 'house', 's' => 'senate'}[type.first.downcase],
-
-        short_title: doc['short_title'],
-        official_title: doc['official_title'],
-        popular_title: doc['popular_title'],
-
-        titles: doc['titles'],
-
-        keywords: doc['subjects'],
-        summary: summary,
-        summary_short: summary_short,
-        summary_date: summary_date,
-
-        sponsor: sponsor,
-        sponsor_id: (sponsor ? sponsor['bioguide_id'] : nil),
-        cosponsors: cosponsors,
-        cosponsor_ids: cosponsors.map {|c| c['legislator']['bioguide_id']},
-        cosponsors_count: cosponsors.size,
-        withdrawn_cosponsors: withdrawn,
-        withdrawn_cosponsor_ids: withdrawn.map {|c| c['legislator']['bioguide_id']},
-        withdrawn_cosponsors_count: withdrawn.size,
-
-        introduced_on: introduced_on,
-        history: history_for(doc['history']),
-        enacted_as: enacted_as_for(doc),
-
-        actions: actions,
-        last_action: last_action,
-        last_action_at: last_action_at,
-
-        votes: votes,
-        last_vote_at: votes.last ? votes.last['acted_at'] : nil,
-
-        committees: committees,
-        committee_ids: committees.map {|c| c['committee']['committee_id']},
-        related_bill_ids: related_bill_ids,
-
-        urls: urls_for(bill_id)
-      }
+    #rows belong to a table that contains a list of the bills
+    rows.each do |row|
+      bill = create_bill row
 
       if bill.save
-        # work-around - last_action_at and last_vote_at can both be dates or times,
-        # and Mongo does not order these correctly together when times are turned into
-        # Mongo native time objects. So, we serialize them to a string before saving it.
-        ['last_action_at', 'last_vote_at'].each do |field|
-          if bill[field]
-            bill[field] = bill[field].xmlschema unless bill[field].is_a?(String)
-            bill.set(field, bill[field])
-          end
-        end
-
         count += 1
-        puts "[#{bill_id}] Saved successfully" if options[:debug]
+        puts "[#{bill.bill_id}] Saved successfully" if options[:debug]
       else
         bad_bills << {attributes: bill.attributes, error_messages: bill.errors.full_messages}
         puts "[#{bill_id}] Error saving, will file report"
       end
-    end
 
-    if missing_legislators.any?
-      missing_legislators = missing_legislators.uniq
-      Report.warning self, "Found #{missing_legislators.size} unmatchable legislators.", {missing_legislators: missing_legislators}
     end
-
-    if missing_committees.any?
-      missing_committees = missing_committees.uniq
-      # Report.warning self, "Found #{missing_committees.size} missing committee IDs or subcommittee names.", {missing_committees: missing_committees}
-    end
-
-    if bad_bills.any?
-      Report.failure self, "Failed to save #{bad_bills.size} bills.", bill: bad_bills.last
-    end
-
-    if new_summaries.any?
-      Event.new_summaries! new_summaries
-      # Report.warning self, "Summaries added for #{new_summaries.size} bills, data attached", new_summaries: new_summaries
-    end
-
-    Report.success self, "Synced #{count} bills for congress ##{congress} from THOMAS.gov."
   end
 
-  def self.sponsor_for(sponsor, legislators)
-    # cached by thomas ID
-    if legislators[sponsor['thomas_id']]
-      legislators[sponsor['thomas_id']]
-    elsif legislator = legislator_for(sponsor['thomas_id'])
-      # cache it for next time
-      legislators[sponsor['thomas_id']] = legislator
-      legislator
+  def self.create_bill(billtrack_row)
+    # initialize bill by bill_id
+    # get attributes from the billtrack_row
+    
+    col_vals = billtrack_row.css('td')
+
+    #first columns points to the bill title
+    #second column gives the status
+    #third column gives the links to the bill text and the summary
+
+    if (col_vals.count != 3)
+      return nil
+    end
+
+    title, ministry, introduced_on, summary, ls_status, rs_status, bill_url, com_ref, com_rep, last_action, last_action_at = bill_details(col_vals[0])
+    last_action_at = nil if Date.civil == last_action_at
+    bill_id = title # We'd make title of the bill as its id if we cannot find its number
+
+    status = bill_status(col_vals[1])
+    bill_text_filepath = bill_text(col_vals[2])
+    text = ''
+    if (bill_text_filepath.nil?)
+      puts "Failed to extract text of the bill."
+      text = ''
     else
-      # no match, this needs to get reported
-      nil
-    end
-  end
-
-  # just make sure all the dates are in UTC
-  def self.history_for(history)
-    new_history = history.dup
-    history.each do |key, value|
-      if (key =~ /_at$/) and (value[":"])
-        new_history[key] = Utils.utc_parse(value)
-      end
-    end
-    new_history
-  end
-
-  def self.cosponsors_for(cosponsors, legislators)
-    new_cosponsors = []
-    withdrawn_cosponsors = []
-    missing = []
-
-    cosponsors.each do |cosponsor|
-      person = nil
-
-      if legislators[cosponsor['thomas_id']]
-        person = legislators[cosponsor['thomas_id']]
-      elsif person = legislator_for(cosponsor['thomas_id'])
-        # cache it for next time
-        legislators[cosponsor['thomas_id']] = person
-      end
-
-      if person
-        cosponsorship = {'sponsored_on' => cosponsor['sponsored_at']}
-        if cosponsor['withdrawn_at']
-          cosponsorship['withdrawn_on'] = cosponsor['withdrawn_at']
-          withdrawn_cosponsors << cosponsorship.merge('legislator' => person)
-        else
-          new_cosponsors << cosponsorship.merge('legislator' => person)
-        end
-      else
-        missing << cosponsor
-      end
-
+      text = File.read(bill_text_filepath)
+      bill_id, introduced_by = read_bill_text bill_text_filepath
+      File.delete(bill_text_filepath)
     end
 
-    [new_cosponsors, withdrawn_cosponsors, missing]
-  end
+    # Now start creating a bill object that can be returned to the caller
+    bill = Bill.find_or_initialize_by bill_id: bill_id
 
-  # clean up on some fields in actions
-  def self.actions_for(actions, committee_cache)
-    now = Time.now
-
-    actions.map do |action|
-
-      if action['acted_at'].is_a?(String)
-        time = Time.parse(action['acted_at'])
-      else
-        time = action['acted_at']
-      end
-
-      # discard future 'actions', that's not what this is about
-      next if time > now
-
-      if action['acted_at'] =~ /:/
-        action['acted_at'] = Utils.utc_parse action['acted_at']
-      end
-
-      if where = action.delete('where')
-        action['chamber'] = {'h' => 'house', 's' => 'senate'}[where]
-
-        # can only do this if 'where' is present (which it should be)
-        if roll = action.delete('roll')
-          action['roll_id'] = "#{where}#{roll}-#{time.year}"
-        end
-      end
-
-      committees = []
-      if committee_ids = action.delete('committees')
-        committee_ids.each do |committee_id|
-          if match = committee_match(committee_id, committee_cache)
-            committees << {
-              'committee_id' => committee_id,
-              'name' => match['name']
-            }
-          end
-        end
-      end
-      action['committees'] = committees if committees.any?
-
-      # these are old, unsupported forms of attaching committees to actions
-      action.delete 'committee'
-      action.delete 'subcommittee'
-      action.delete 'in_committee'
-
-      # we don't use this one
-      action.delete 'status'
-
-      action
-    end.compact
-  end
-
-  def self.votes_for(actions)
-    actions.select do |action|
-      (action['type'] =~ /vote/)
-    end
-  end
-
-  def self.committees_for(elements, committee_cache)
-    committees = []
-    missing = []
-
-    elements.each do |committee|
-      # we're not getting subcommittees, way too hard to match them up
-      if committee['subcommittee_id'].present?
-        committee_id = committee['committee_id'] + committee['subcommittee_id']
-      elsif committee['subcommittee']
-        puts "unitedstates layer failed to normalize subcommittee (#{committee['subcommittee']}) for committee ID #{committee['committee_id']} -- skipping"
-        next
-      else
-        committee_id = committee['committee_id']
-      end
-
-      if match = committee_match(committee_id, committee_cache)
-        committees << {
-          'activity' => committee['activity'],
-          'committee' => match
-        }
-      else
-        missing << committee_id
-      end
-    end
-
-    [committees, missing]
-  end
-
-  def self.legislator_for(thomas_id)
-    legislator = Legislator.where(thomas_id: thomas_id).first
-    legislator ? Utils.legislator_for(legislator) : nil
-  end
-
-  def self.committee_match(id, committee_cache)
-    committee_cache ||= {}
-
-    unless committee_cache[id]
-      if committee = Committee.where(committee_id: id).first
-        committee_cache[id] = Utils.committee_for(committee)
-      end
-    end
-
-    committee_cache[id]
-  end
-
-  def self.summary_for(summary)
-    summary ? summary['text'] : nil
-  end
-
-  def self.summary_date_for(summary)
-    summary ? summary['date'] : nil
-  end
-
-  def self.short_summary_for(summary)
-    return nil unless summary
-
-    max = 1000
-    if summary.size <= max
-      summary
-    else
-      summary[0..max] + "..."
-    end
-  end
-
-  def self.urls_for(bill_id)
-    type, number, congress, chamber = Utils.bill_fields_from bill_id
-    {
-      congress: congress_gov_url(congress, type, number),
-      govtrack: govtrack_url(congress, type, number),
-      opencongress: opencongress_url(bill_id)
+    bill.attributes = {
+      title: title,
+      status: status,
+      ministry: ministry.to_s,
+      introduced_on: introduced_on.to_s,
+      ls_status: ls_status.to_s,
+      rs_status: rs_status.to_s,
+      com_ref: com_ref.to_s,
+      com_rep: com_rep.to_s,
+      last_action: last_action.to_s,
+      last_action_at: last_action_at.to_s,
+      introduced_by: introduced_by.to_s,
+      summary: summary,
+      text: text,
+      url: bill_url
     }
+
+    return bill
   end
 
-  def self.opencongress_url(bill_id)
-    "http://www.opencongress.org/bill/#{bill_id}"
+  def self.read_bill_text(bill_filepath)
+    return nil unless File.exists? bill_filepath
+
+    bill_num = nil
+    bill_sponsor = nil
+
+    f = File.open bill_filepath, 'r'
+    while !f.eof?
+      break unless bill_num.nil? or bill_sponsor.nil?
+      line = f.readline
+
+      if bill_num.nil?
+        m = /bill (No.|No|Number) ([\da-z]+) of (20\d\d)$/i.match line
+        if (not m.nil?)
+          bill_num = "Bill #{m.captures[1]}, #{m.captures[2]}"
+          next
+        end
+      end
+      if (bill_sponsor.nil?)
+        m = /\((Shri|Mr.|Smt.|Shrimati|Mrs.) (.*)?, Minister of .*/.match line
+        if (not m.nil?)
+          bill_sponsor = "#{m.captures[1]}, Minister"
+          next
+        end
+      end
+    end
+
+    f.close
+    return bill_num, bill_sponsor
   end
 
-  def self.govtrack_url(congress, type, number)
-    "https://www.govtrack.us/congress/bills/#{congress}/#{type}#{number}"
+  def self.bill_status(billstatus_col)
+    s = billstatus_col.text.strip
+    # Remove any extended ASCII character in the tail
+    while (s[-1].ord > 127)
+      s.chop!
+    end
+    return s.strip
   end
 
-  # todo: when they expand to earlier (or later) congresses, 'th' is not a universal ordinal
-  def self.congress_gov_url(congress, type, number)
-    "http://beta.congress.gov/bill/#{congress}th/#{congress_gov_type type}/#{number}"
+  def self.bill_text(billtext_col)
+    data_dir_path = 'download' # <-- TODO: We will make it configurable through the environment settings
+    billtext_col.css('a').each do |a|
+      #binding.remote_pry
+      if (a.text.lstrip.start_with? 'Bill Text' or a.text.lstrip.start_with? 'Ordinance Text')
+        filename_noext = "#{data_dir_path}/bill_#{Time.now.strftime '%d_%s'}"
+        filename_pdf = "#{filename_noext}.pdf"
+        filename_txt = "#{filename_noext}.txt"
+        Dir.mkdir(data_dir_path) unless Dir.exists?(data_dir_path)
+        text_link = URI.join(@billtrack_url, a['href']).to_s #avoid errors due to relative paths
+        c = Curl::Easy.download(text_link, filename_pdf)
+        if ('200 OK' != c.status)
+          Report.warning self, "Could not download the PDF file from #{a['href']}"
+          return nil
+        end
+
+        if (File.exists?(filename_pdf))
+          Docsplit.extract_text(filename_pdf, :ocr => false, :output => data_dir_path)
+          return filename_txt if File.exists? filename_txt
+        end
+      end
+    end
+    return nil
   end
 
-  def self.congress_gov_type(bill_type)
-    {
-      "hr" => "house-bill",
-      "hres" => "house-resolution",
-      "hconres" => "house-concurrent-resolution",
-      "hjres" => "house-joint-resolution",
-      "s" => "senate-bill",
-      "sres" => "senate-resolution",
-      "sconres" => "senate-concurrent-resolution",
-      "sjres" => "senate-joint-resolution"
-    }[bill_type]
+  def self.find_ministry(ministry_node)
+    return nil if ministry_node.nil? or ministry_node.previous().nil? or ministry_node.previous().previous().nil?
+    return ministry_node.text.strip if (':' == ministry_node.previous().text) and ('Ministry' == ministry_node.previous().previous().text)
+    return nil
   end
 
-  def self.enacted_as_for(doc)
-    return nil unless doc['enacted_as']
+  #billtrack_col = One of the column in the HTML table that has the URL of the details page of the bill
+  #This function first finds the URL of the details page of bill, and then scraps it to find all the
+  #related details, and sends them back to the client in an array
+  def self.bill_details(billtrack_col)
+    ret_title = billtrack_col.text.strip
+    bill_detail_url = billtrack_col.css('a').first()['href']
 
-    enacted_as = doc['enacted_as'].dup
-    enacted_as['congress'] = enacted_as['congress'].to_i
-    enacted_as['number'] = enacted_as['number'].to_i
-    enacted_as
+	  ret_summary = ret_ministry = ''
+    ret_introduced_on = ret_ls_status = ret_rs_status = ret_com_ref = ret_com_rep = last_action = nil
+    last_action_at = Date.civil
+
+    puts "Parsing bill details at: #{bill_detail_url}"
+
+    bill_detail_doc = Utils.html_for bill_detail_url
+
+    #We've parsed the HTML details page of bill. 
+    #let's scrap the important information from it
+    tables = bill_detail_doc.css('form#prs-billtrack1 table')
+    if (tables)
+      ministry_node = tables.at('span.text1')
+      ret_ministry = find_ministry ministry_node
+      first = true
+      tds = tables.css('td.text1')
+    
+      ret_summary = tds[0].text.strip unless tds.nil? or tds.count == 0 or tds[0].text == 'Introduction'
+
+      idx = 1
+      while (idx < tds.count)
+        td = tds[idx]
+        idx = idx + 1
+
+        case td.text
+        when 'Introduction'
+          if (ret_introduced_on.nil?) # Some pages are not well formatted
+            ret_introduced_on = Utils.parse_date(td.next().text) unless td.next().nil?
+            last_action, last_action_at = 'Introduction', ret_introduced_on if ret_introduced_on > last_action_at unless ret_introduced_on.nil?
+            idx = idx + 1
+          end
+        when 'Com. Ref.'
+          date = Utils.parse_date(td.next().text) unless td.next().nil?
+          ret_com_ref = date unless date.nil? or date > Date.today
+          last_action, last_action_at = 'Referred to the standing committee', ret_com_ref if ret_com_ref > last_action_at unless ret_com_ref.nil?
+          idx = idx + 1
+        when 'Com. Rep.'
+          date = Utils.parse_date(td.next().text) unless td.next().nil?
+          ret_com_rep = date unless date.nil? or date > Date.today
+          last_action, last_action_at = 'Report presented by the standing committee', ret_com_rep if ret_com_rep > last_action_at unless ret_com_rep.nil?
+          idx = idx + 1
+        when 'Lok Sabha'
+          date = Utils.parse_date(td.next().text) unless td.next().nil?
+          ret_ls_status = date unless date.nil? or date > Date.today
+          last_action, last_action_at = 'Bill debated and passed in Lok Sabha', ret_ls_status if ret_ls_status > last_action_at unless ret_ls_status.nil?
+          idx = idx + 1
+        when 'Rajya Sabha'
+          date = Utils.parse_date(td.next().text) unless td.next().nil?
+          ret_rs_status = date unless date.nil? or date > Date.today
+          last_action, last_action_at = 'Bill debated and passed in Rajya Sabha', ret_rs_status if ret_rs_status > last_action_at unless ret_rs_status.nil?
+          idx = idx + 1
+        end
+      end
+    end
+
+    return ret_title, ret_ministry, ret_introduced_on, ret_summary, ret_ls_status, 
+      ret_rs_status, bill_detail_url, ret_com_ref, ret_com_rep, last_action, last_action_at
   end
 end
