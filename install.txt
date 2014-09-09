@@ -6,6 +6,8 @@ Installation:
   4.1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor
 5. Rack -- sudo gem install rack
 6. Mongodb -- brew update; brew install mongodb
+7. Xquartz -- Install from the 'net.
+8. Poppler (for Docsplit gem) -- brew install poppler
 
 Running:
 1. mongod --httpinterface --dbpath ~/data/db/
