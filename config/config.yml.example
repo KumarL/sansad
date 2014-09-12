@@ -13,6 +13,13 @@ location:
   host:
   zips: # path to district CSV to output
 
+# addresses of site and project
+:urls:
+  :code: https://github.com/kumarl/sansad
+  :bugs: https://github.com/kumarl/sansad/issues
+  :site: http://sansad.cloudapp.net
+  :api: http://sansad.cloudapp.net/api
+  :documentation: http://sansad.cloudapp.net
 
 # set to false in production!
 :debug:
