@@ -165,20 +165,13 @@ end
 get '/' do
   result = {}
 
-  if request.env['HTTP_X_FORWARDED_PROTO'] == 'http'
-    result[:please_use_the_https_endpoint_at] = "https://congress.api.sunlightfoundation.com"
-    result[:please] = "https://congress.api.sunlightfoundation.com"
-  elsif request.env['HTTP_X_FORWARDED_PROTO'] == 'https'
-    result[:thank_you] = "for using https"
-  end
-
   json(result.merge(
     status: 200,
-    message: "I live!",
-    documentation: "https://sunlightlabs.github.io/congress/",
-    code: "https://github.com/sunlightlabs/congress",
-    report_bugs: "https://github.com/sunlightlabs/congress/issues",
-    more_apis: "http://sunlightfoundation.com/api/"
+    message: "Namaste!",
+    documentation: Environment.config[:urls][:documentation],
+    code: Environment.config[:urls][:code],
+    report_bugs: Environment.config[:urls][:bugs],
+    more_apis: Environment.config[:urls][:api]
   ))
 end
 
