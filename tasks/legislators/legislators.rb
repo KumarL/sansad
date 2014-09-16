@@ -24,40 +24,45 @@ class Legislators
     count = 0
 
     legislator_urls.keys.each do |chamber|
-      mpbook_path = "download/#{chamber.gsub(/\s+/, "")}New.xlx"
-      File.delete mpbook_path if File.exists? mpbook_path
+      mpbook_path = "download/#{chamber.gsub(/\s+/, "")}.xlx"
+      unless options[:cache]
+        #Re-download the excel file, and update the existing one if the file in cloud has changed
+        mpbook_new_path = "download/#{chamber.gsub(/\s+/, "")}New.xlx"
+        book_url = legislator_urls[chamber]
+        result = Utils.curl book_url, mpbook_new_path
+        if result.nil?
+          puts "Failed to download the Excel file from #{book_url}"
+          next
+        end
 
-      book_url = legislator_urls[chamber]
+        if '200 OK' != result.status
+          puts "The HTTP download of the excel file with HTTP error code #{result.status}"
+          next
+        end
 
-      result = Utils.curl book_url, mpbook_path
-      if result.nil? or '200 OK' != result.status
-        puts "Couldn't download the MP file. The url #{book_url} returned with status #{result.status}" 
-        next
-      end
-
-      # Check if the newly downloaded file is same as the last download
-      mpbook_old_path = "download/#{chamber.gsub(/\s+/, "")}.xlx"
-      if (File.exists? mpbook_old_path)
-	      old_file = File.new mpbook_old_path
-	      new_file = File.new mpbook_path
+        # File was succesfully downloaded
+        if (File.exists? mpbook_path)
+	      old_file = File.new mpbook_path
+	      new_file = File.new mpbook_new_path
 
 	      old_chksum = Digest::SHA2.file(old_file).hexdigest
 	      new_chksum = Digest::SHA2.file(new_file).hexdigest
 
-	      if (old_chksum == new_chksum) # If the downloaded file is bit indentical to last download
-	        File.delete mpbook_path
+	      if (old_chksum == new_chksum)
+            # The downloaded file is bit-identical to the last download. Ignore..
+	        File.delete mpbook_new_path
 	        next
-	      end
+          end
+        end
+
+        File.rename(mpbook_new_path, mpbook_path)
       end
 
-	    # If you are here, that means we want to work with the newly downloaded file
-      # First step - Rename it to the new with the "old" file, overriding if needed
-	    File.rename(mpbook_path,mpbook_old_path)
-      book = Spreadsheet.open mpbook_old_path
+	  # If you are here, that means we want to work with the mpbook_path
+      book = Spreadsheet.open mpbook_path
       sheet1 = book.worksheet 0 # Access the first worksheet
       is_first = true
       sheet1.each do |row|
-
         if (is_first)
           is_first = false
           next # Ignore the header row
@@ -105,59 +110,53 @@ class Legislators
   end
 
   def self.attributes_from_prs(row, house)
-    name_index = 0
-    elected_index = 1
-    term_start_index = 2
-    term_end_index = 3
-    state_name_index = 4
-    constituency_index = 5
-    party_index = 6
-    gender_index = 7
-    education_qualification_index = 8
-    education_details_index = 9
-    age_index = 10
-    debates_index = 11
-    private_bills_index = 12
-    questions_index = 13
-    attendance_index = 14
-    notes_index = 15
+    name_index                      = 0
+    elected_index                   = 1
+    term_start_index                = 2
+    term_end_index                  = 3
+    state_name_index                = 4
+    constituency_index              = 5
+    party_index                     = 6
+    gender_index                    = 7
+    education_qualification_index   = 8
+    education_details_index         = 9
+    age_index                       = 10
+    debates_index                   = 11
+    private_bills_index             = 12
+    questions_index                 = 13
+    attendance_index                = 14
+    notes_index                     = 15
 
     first_name, last_name = Utils.split_fullname row[name_index]
-    elected = row[elected_index].downcase.eql? 'Elected'.downcase
-    in_office = true # We're only querying the current session of the parliament
+
+    elected     = row[elected_index].downcase.eql? 'Elected'.downcase
+    questions   = (row[questions_index].class == Spreadsheet::Formula) ? row[questions_index].value.to_i.to_s : row[questions_index].to_i.to_s
+    in_office   = row[term_end_index].downcase.eql? 'In office'.downcase # Some Rajya sabha's membership might have expired
 
     attributes = {
-      bioguide_id: row[name_index] + '_' + row[state_name_index],
-      first_name: first_name.to_s,
-      last_name: last_name.to_s,
-      gender: row[gender_index],
-      age: row[age_index].to_i.to_s,
-      state: row[state_name_index],
-      constituency: row[constituency_index].to_s,
-      party: row[party_index],
-      elected: elected,
-      in_office: in_office,
-      education_qualification: row[education_qualification_index],
-      education_details: row[education_details_index],
-      debates: row[debates_index],
-      private_bills: row[private_bills_index],
-      questions: row[questions_index],
-      attendance: (row[attendance_index] * 100).to_i.to_s,
-      notes: row[notes_index],
-      chamber: house,
-      term_start: row[term_start_index].to_s,
-      term_end: row[term_end_index].to_s
+      bioguide_id:                  row[name_index] + '_' + row[state_name_index],
+      first_name:                   first_name.to_s,
+      last_name:                    last_name.to_s,
+      gender:                       row[gender_index],
+      age:                          row[age_index].to_i.to_s,
+      state:                        row[state_name_index],
+      constituency:                 row[constituency_index].to_s,
+      party:                        row[party_index],
+      elected:                      elected.to_s,
+      in_office:                    in_office.to_s,
+      education_qualification:      row[education_qualification_index],
+      education_details:            row[education_details_index],
+      debates:                      row[debates_index].to_i.to_s,
+      private_bills:                row[private_bills_index].to_i.to_s,
+      questions:                    questions,
+      attendance:                   (row[attendance_index] * 100).to_i.to_s,
+      notes:                        row[notes_index],
+      chamber:                      house,
+      term_start:                   row[term_start_index].to_s,
+      term_end:                     row[term_end_index].to_s
     }
 
     attributes # return attributes
-  end
-
-  def self.party_for(us_party)
-    {
-      'Democrat' => 'D',
-      'Republican' => 'R',
-      'Independent' => 'I'
-    }[us_party] || us_party
   end
 
   def self.social_media_from(details)
