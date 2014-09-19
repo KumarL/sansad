@@ -31,6 +31,11 @@ class Bills
 
     #rows belong to a table that contains a list of the bills
     rows.each do |row|
+
+      if (options[:limit] and count >= options[:limit].to_i)
+        break
+      end
+
       bill = create_bill row
 
       if bill.save
