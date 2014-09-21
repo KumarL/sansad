@@ -8,17 +8,20 @@ class Legislators
   #   current: limit to current legislators only
   #   limit: stop after N legislators
   #   clear: wipe the db of legislators first
-  #   bioguide_id: limit to one legislator, with this bioguide ID
 
   def self.run(options = {})
 
     # 1. Download the excel file
     # 2. Compute checksum and exit if it's same as the last download
     # 3. If not, update the db
-    lsbook_url = "http://www.prsindia.org/MPTrack-16.xls"
-    rsbook_url = "http://www.prsindia.org/Rajya.xls"
+    lsbook_url      = "http://www.prsindia.org/MPTrack-16.xls"
+    rsbook_url      = "http://www.prsindia.org/Rajya.xls"
+    @ls_text        = "Lok Sabha"
+    @rs_text        = "Rajya Sabha"
+    ls_ids_path     = 'tasks/legislators/mp_ls_ids.yml'
+    rs_ids_path     = 'tasks/legislators/mp_rs_ids.yml'
 
-    legislator_urls = {"Lok Sabha" => lsbook_url, "Rajya Sabha" => rsbook_url}
+    legislator_urls = {@ls_text => lsbook_url, @rs_text => rsbook_url}
 
     bad_legislators = []
     count = 0
@@ -61,6 +64,10 @@ class Legislators
 	  # If you are here, that means we want to work with the mpbook_path
       book = Spreadsheet.open mpbook_path
       sheet1 = book.worksheet 0 # Access the first worksheet
+
+      # Open the YAML file and load it into memory
+      name_ids = YAML.load (File.open ( (chamber.eql? @ls_text) ? ls_ids_path : rs_ids_path))
+
       is_first = true
       sheet1.each do |row|
         if (is_first)
@@ -68,8 +75,8 @@ class Legislators
           next # Ignore the header row
         end
 
-        attributes_new = attributes_from_prs row, chamber
-        legislator = Legislator.find_or_initialize_by bioguide_id: attributes_new[:bioguide_id]
+        attributes_new = attributes_from_prs row, chamber, name_ids
+        legislator = Legislator.find_or_initialize_by mp_id: attributes_new[:mp_id]
         legislator.attributes = attributes_new
 
         if legislator.save
@@ -109,7 +116,21 @@ class Legislators
     Report.success self, "Processed #{count} legislators from PRS"
   end
 
-  def self.attributes_from_prs(row, house)
+  def self.get_mp_id(full_name, house, name_id_map)
+    unless name_id_map.has_key? full_name
+      return full_name
+    end
+
+    mp_id = name_id_map[full_name]
+    if house.eql? @ls_text
+      return mp_id.to_s
+    else
+      return mp_id.to_s + "RS"
+    end
+  end
+    
+
+  def self.attributes_from_prs(row, house, name_id_map)
     name_index                      = 0
     elected_index                   = 1
     term_start_index                = 2
@@ -128,13 +149,14 @@ class Legislators
     notes_index                     = 15
 
     first_name, last_name = Utils.split_fullname row[name_index]
+    mp_id = get_mp_id row[name_index], house, name_id_map
 
     elected     = row[elected_index].downcase.eql? 'Elected'.downcase
     questions   = (row[questions_index].class == Spreadsheet::Formula) ? row[questions_index].value.to_i.to_s : row[questions_index].to_i.to_s
     in_office   = row[term_end_index].downcase.eql? 'In office'.downcase # Some Rajya sabha's membership might have expired
 
     attributes = {
-      bioguide_id:                  row[name_index] + '_' + row[state_name_index],
+      mp_id:                        mp_id,
       first_name:                   first_name.to_s,
       last_name:                    last_name.to_s,
       gender:                       row[gender_index],
@@ -149,9 +171,9 @@ class Legislators
       debates:                      row[debates_index].to_i.to_s,
       private_bills:                row[private_bills_index].to_i.to_s,
       questions:                    questions,
-      attendance:                   (row[attendance_index] * 100).to_i.to_s,
+      attendance_percentage:        (row[attendance_index] * 100).to_i.to_s,
       notes:                        row[notes_index],
-      chamber:                      house,
+      house:                        house,
       term_start:                   row[term_start_index].to_s,
       term_end:                     row[term_end_index].to_s
     }

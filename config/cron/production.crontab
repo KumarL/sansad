@@ -19,8 +19,6 @@
 # legislators and committees from unitedstates
 51 3 * * *  /projects/congress-api/congress/shared/cron/task.sh legislators && /projects/congress-api/congress/shared/cron/task.sh legislators_bulk backup=1 && /projects/congress-api/congress/shared/cron/task.sh committees
 
-
-
 # bills from THOMAS, once an hour (THOMAS scraper uses --fast mode)
 39 * * * * /projects/congress-api/congress/shared/cron/us-sync-bills.sh && /projects/congress-api/congress/shared/cron/task.sh bills
 
