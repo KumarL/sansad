@@ -1,14 +1,13 @@
 #!/bin/bash
 
 . $HOME/.bashrc 
-source $HOME/.virtualenvs/congress/bin/activate
-cd $HOME/congress/current 
+cd $HOME/sansad
 
 FIRST=$1
 
-lockfile -r 10 $HOME/tmp/locks/$FIRST.lock
+lockfile -r 10 $HOME/sansad/tmp/locks/$FIRST.lock
 
 shift
-rake task:$FIRST $@ > $HOME/congress/shared/cron/output/$FIRST.txt 2>&1
+/usr/local/bin/bundle exec rake task:$FIRST $@ > $HOME/sansad/dump/cron/output/$FIRST.txt 2>&1
 
-rm -f $HOME/tmp/locks/$FIRST.lock
+rm -f $HOME/sansad/tmp/locks/$FIRST.lock
