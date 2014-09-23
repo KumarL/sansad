@@ -21,3 +21,6 @@
 .bundle
 /download
 *.swp
+/tmp
+/dump
+/vendor/bundle
