@@ -1,93 +1,10 @@
 ############# unitedstates tasks ###########
 
-
-# sync unitedstates/congress data with S3 mirror once a day
-46 13 * * *   /projects/congress-api/congress/shared/cron/s3-sync-congress.sh
-
-# generate unitedstates/congress-legislators social media leads once a night
-27 13 * * *   /projects/congress-api/congress/shared/cron/social-media-leads.sh
-
-# upcoming bills for the house - us and then a congress task
-*/17 * * * *    /projects/congress-api/congress/shared/cron/us-sync-upcoming-house-floor.sh
-
-############# congress API tasks #########################
-
-## analytics reporting
-47 6 * * *  /projects/congress-api/congress/shared/cron/analytics.sh
-
-
 # legislators and committees from unitedstates
-51 3 * * *  /projects/congress-api/congress/shared/cron/task.sh legislators && /projects/congress-api/congress/shared/cron/task.sh legislators_bulk backup=1 && /projects/congress-api/congress/shared/cron/task.sh committees
+51 3 * * *  ~/sansad/config/cron/scripts/task.sh legislators 
 
 # bills from THOMAS, once an hour (THOMAS scraper uses --fast mode)
-39 * * * * /projects/congress-api/congress/shared/cron/us-sync-bills.sh && /projects/congress-api/congress/shared/cron/task.sh bills
-
-# amendments from THOMAS, once an hour (THOMAS scraper uses --fast mode)
-47 * * * * /projects/congress-api/congress/shared/cron/us-sync-amendments.sh && /projects/congress-api/congress/shared/cron/task.sh amendments
-
-# nominations from THOMAS, once a day (THOMAS scraper uses --force)
-19 13 * * * /projects/congress-api/congress/shared/cron/us-sync-nominations.sh && /projects/congress-api/congress/shared/cron/task.sh nominations
-
-# re-download bills and amendments once a day, don't use --fast mode
-11 11 * * * /projects/congress-api/congress/shared/cron/us-sync-bills-all.sh
-41 12 * * * /projects/congress-api/congress/shared/cron/us-sync-amendments-all.sh
-
-
-# bill text from GPO, every half hour for the 113th
-*/30 * * * * /projects/congress-api/congress/shared/cron/task.sh bills_bulk
-
-# re-index text a few times, GPO releases in bursts
-31 10,14,17 * * * /projects/congress-api/congress/shared/cron/task.sh bills_text backup=1
-
-# popular bill names, check once an hour
-10 * * * * /projects/congress-api/congress/shared/cron/task.sh bills_nicknames
-
-
-
-# video
-30 9 * * *    /projects/congress-api/congress/shared/cron/task.sh videos captions=True
-20 7 * * *    /projects/congress-api/congress/shared/cron/task.sh videos captions=True senate=True
-
-
-
-# votes from house and senate, download last 10 votes every few minutes, stagger them
-*/5 * * * * /projects/congress-api/congress/shared/cron/task.sh votes_house latest=10
-*/9 * * * * /projects/congress-api/congress/shared/cron/task.sh votes_senate latest=10
-
-# re-download all votes for the year, once a day, to catch corrections
-0 4 * * *  /projects/congress-api/congress/shared/cron/task.sh votes_house year=current force=1
-30 4 * * *  /projects/congress-api/congress/shared/cron/task.sh votes_senate year=current force=1
-
-
-# floor updates
-*/2 * * * *  /projects/congress-api/congress/shared/cron/task.sh floor_senate
-# loads information from the us house floor scraper
-*/1 * * * *  /projects/congress-api/congress/shared/cron/task.sh floor_house
-
-
-# Senate committee hearings
-*/14 * * * * /projects/congress-api/congress/shared/cron/task.sh hearings_senate
-
-# New committee hearings using unitedstates scraper
-1 */3 * * * /projects/congress-api/congress/shared/cron/us-sync-meetings.sh && /projects/congress-api/congress/shared/cron/task.sh hearings_house && /projects/congress-api/congress/shared/cron/task.sh congressional_documents
-
-
-# upcoming leadership information
-*/13 * * * * /projects/congress-api/congress/shared/cron/task.sh upcoming_senate
-# upcoming house is with us jobs above
-
-
-# GAO reports (full text) - add 1s between requests
-*/19 * * * * /projects/congress-api/congress/shared/cron/task.sh gao_reports rate_limit=1
-
-# IG reports, once every 5 hours
-4 */5 * * * /projects/congress-api/congress/shared/cron/us-sync-igs.sh && /projects/congress-api/congress/shared/cron/task.sh ig_reports since=2009
-
-# formally published regs and notices, last 2 days - takes <2m even without cache
-10,30,50 * * * * /projects/congress-api/congress/shared/cron/task.sh regulations cache=1 days=2 backup=1
-
-# public inspection docs (don't use cache, PDF URLs get filled in later)
-15,35,55 * * * * /projects/congress-api/congress/shared/cron/task.sh regulations public_inspection=1
+39 * * * * ~/sansad/config/cron/scripts/task.sh bills limit=10
 
 
 # leave the newline here
