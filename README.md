@@ -1,4 +1,4 @@
-## Sunlight Congress API
+## Sansad API
 
 This is the code that powers the [Sansad API](http://sansad.cloudapp.net/api).
 
