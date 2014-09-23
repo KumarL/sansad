@@ -160,6 +160,7 @@ class Bills
 
         if (File.exists?(filename_pdf))
           Docsplit.extract_text(filename_pdf, :output => data_dir_path)
+          File.delete filename_pdf
           return filename_txt if File.exists? filename_txt
         end
       end
