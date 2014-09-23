@@ -123,7 +123,7 @@ class Bills
       if (bill_sponsor.nil?)
         m = /\((Shri|Mr.|Smt.|Shrimati|Mrs.) (.*)?, Minister of .*/.match line
         if (not m.nil?)
-          bill_sponsor = "#{m.captures[1]}, Minister"
+          bill_sponsor = m.captures[1]
           next
         end
       end
@@ -159,7 +159,7 @@ class Bills
         end
 
         if (File.exists?(filename_pdf))
-          Docsplit.extract_text(filename_pdf, :ocr => false, :output => data_dir_path)
+          Docsplit.extract_text(filename_pdf, :output => data_dir_path)
           return filename_txt if File.exists? filename_txt
         end
       end
