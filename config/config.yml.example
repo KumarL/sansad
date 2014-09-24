@@ -17,8 +17,8 @@ location:
 :urls:
   :code: https://github.com/kumarl/sansad
   :bugs: https://github.com/kumarl/sansad/issues
-  :site: http://sansad.cloudapp.net
-  :api: http://sansad.cloudapp.net/api
+  :site: http://sansad.co
+  :api: http://sansad.co/api
   :documentation: http://sansad.cloudapp.net
 
 # set to false in production!
