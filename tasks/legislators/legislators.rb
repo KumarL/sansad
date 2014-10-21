@@ -151,16 +151,20 @@ class Legislators
     first_name, last_name = Utils.split_fullname row[name_index]
     mp_id = get_mp_id row[name_index], house, name_id_map
 
-    elected     = row[elected_index].downcase.eql? 'Elected'.downcase
-    questions   = (row[questions_index].class == Spreadsheet::Formula) ? row[questions_index].value.to_i.to_s : row[questions_index].to_i.to_s
-    in_office   = row[term_end_index].downcase.eql? 'In office'.downcase # Some Rajya sabha's membership might have expired
+    elected         = row[elected_index].downcase.eql? 'Elected'.downcase
+    questions       = (row[questions_index].class == Spreadsheet::Formula) ? row[questions_index].value.to_i : row[questions_index].to_i
+    in_office       = row[term_end_index].downcase.eql? 'In office'.downcase # Some Rajya sabha's membership might have expired
+    age             = row[age_index].to_i
+    debates         = row[debates_index].to_i
+    private_bills   = row[private_bills_index].to_i
+    attendance      = (row[attendance_index] * 100).to_i
 
     attributes = {
       mp_id:                        mp_id,
       first_name:                   first_name.to_s,
       last_name:                    last_name.to_s,
       gender:                       row[gender_index],
-      age:                          row[age_index].to_i.to_s,
+      age:                          age,
       state:                        row[state_name_index],
       constituency:                 row[constituency_index].to_s,
       party:                        row[party_index],
@@ -168,10 +172,10 @@ class Legislators
       in_office:                    in_office,
       education_qualification:      row[education_qualification_index],
       education_details:            row[education_details_index],
-      debates:                      row[debates_index].to_i.to_s,
-      private_bills:                row[private_bills_index].to_i.to_s,
+      debates:                      debates,
+      private_bills:                private_bills,
       questions:                    questions,
-      attendance_percentage:        (row[attendance_index] * 100).to_i.to_s,
+      attendance_percentage:        attendance,
       notes:                        row[notes_index],
       house:                        house,
       term_start:                   row[term_start_index].to_s,
