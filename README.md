@@ -1,6 +1,6 @@
 ## Sansad API
 
-This is the code that powers the [Sansad API](http://sansad.cloudapp.net/api).
+This is the code that powers the [Sansad API](http://sansad.co/api).
 
 ### Overview
 

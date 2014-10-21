@@ -2,17 +2,18 @@ Installation:
 1. Bundler -- sudo gem install bundler
 2. Homebrew -- ruby -e "$(curl -fsSL https://raw.github.com/Homebrew/homebrew/go/install)"
 3. graphicsmagick -- brew install graphicsmagick
-4. sudo apt-get install libcurl4-openssl-dev
-5. Gemfile -- bundle install --local --path vendor
-  5.1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor
-6. Rack -- sudo gem install rack
-7. Mongodb -- brew update; brew install mongodb
-8. Xquartz -- Install from the 'net.
-9. Poppler (for Docsplit gem) -- brew install poppler
+4. tesseract-ocr -- sudo apt-get install teserract-ocr
+5. sudo apt-get install libcurl4-openssl-dev
+6. Gemfile -- bundle install --local --path vendor
+  6.1. ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future bundle install --local --path vendor
+7. Rack -- sudo gem install rack
+8. Mongodb -- brew update; brew install mongodb
+9. Xquartz -- Install from the 'net.
+10.Poppler (for Docsplit gem) -- brew install poppler
 
 Running:
 1. mongod --httpinterface --dbpath ~/data/db/
-2. rackup
+2. bundle exec unicorn -c unicorn.rb --daemonize
 
 Tasks:
 1. bundle exec rake task:legislators
